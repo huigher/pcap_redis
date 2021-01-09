@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
-import datetime, calendar,time
-import random
-import sys
-import logging
-import json
+import time
 
 
 def timstamp2timestring(timestamp=None):

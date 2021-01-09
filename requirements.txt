@@ -1,4 +1,5 @@
 scapy
 pypcap
+dpkt
 pyshark
 nest_asyncio
