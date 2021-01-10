@@ -454,7 +454,6 @@ Redis command is {redis_command}"""
         # 做一下善后工作，清除所有的临时变量
         self.request_cap = None
         self.response_cap = None
-        # self.tcp_stream_number = None
 
 
 def getargs():
@@ -463,7 +462,7 @@ def getargs():
 
     # 指定parser
     parser.add_argument('--parser', dest='parser', help='set parser type.', type=str,
-                        choices=['dpkt', 'pyshark', 'scapy'])
+                        choices=['dpkt', 'pyshark', 'scapy'],required=True)
 
     # 指定超时阈值，单位毫秒
     parser.add_argument('-t', '--timeout-threshold', dest='timeout_threshold',
@@ -472,7 +471,7 @@ def getargs():
                         required=True)
 
     # 设定输出文件名
-    parser.add_argument('-o', '--output', dest='output_filename', help='set output filename', type=str)
+    parser.add_argument('-o', '--output', dest='output_filename', help='set output filename', type=str,required=True)
 
     # 是否设置为调试模式
     parser.add_argument('-d', dest='debug', help="set to debug mode(may output MANY logs)", action='store_true')
