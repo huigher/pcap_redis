@@ -29,8 +29,7 @@ usage: main.py [-h] [--parser {dpkt,pyshark,scapy}] -t TIMEOUT_THRESHOLD
 注：上述的请求、响应均值Redis协议层，即TCP层不带payload的ACK包不会被认为是"响应"
 
 # 特别感谢
-[PcapPlusPlus](https://pcapplusplus.github.io/)
-以非常高效的性能将一个pcap文件以TCP流为单位，拆分成若干文件
+[PcapPlusPlus](https://pcapplusplus.github.io/) : 以非常高效的性能将一个pcap文件以TCP流为单位，拆分成若干文件
 
 # 最后
-作者时间有限，还没有深究如何可以将拆包这个动作做成平台无关，现在是以一个不太优雅的方式实现：直接在项目中引用了PcapPlusPlus在MacOS下的二进制文件，希望各路大神可以提供更好的思路
+作者时间有限，咱没有搞定PcapPlusPlus的跨平台编译，暂没有深究如何可以将拆包这个动作做成平台无关（主要是PcapPlusPlus在不同系统中的运行依赖），现在是以一个不太优雅的方式实现：直接在项目中引用了PcapPlusPlus在MacOS下的二进制文件 Orz
