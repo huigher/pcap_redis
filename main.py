@@ -1,13 +1,13 @@
 # coding=utf-8
-import pyshark
 import argparse
 import dpkt
-from scapy.all import rdpcap
+import subprocess
+import io
+import tempfile
 import socket
 import collections
 import platform
 import Utils
-import nest_asyncio
 import uuid
 import os
 
@@ -36,23 +36,50 @@ class redis_analyzer:
 
         # 设定一个临时目录
         self.tmp_folder_name = str(uuid.uuid1())
-        self.tmp_folder_path = r'/tmp/' + self.tmp_folder_name + r'/'
+        self.tmp_full_folder_path = tempfile.gettempdir() +os.sep+ self.tmp_folder_name + os.sep
+
+        # 根据操作系统配置一些操作系统相关的变量
+        if platform.system() == 'Darwin':
+            self.pcapplusplus_name = r'PcapSplitter_macos_catalina'
+        elif platform.system() == 'Linux':
+            self.pcapplusplus_name = r'PcapSplitter_centos_7_gcc'
+        elif platform.system()=='Windows':
+            self.pcapplusplus_name = r'PcapSplitter_windows_mingw.exe'
+
+        self.my_real_path=os.path.split(os.path.realpath(__file__))[0]
 
     def initial(self):
         self.output_writer.write(('=' * 50) + '\n')
-        nest_asyncio.apply()
         self.split_capture_file()
 
     def split_capture_file(self):
-        # 判断一下系统类型，暂时只支持MacOS
-        if platform.system() == 'Darwin':
-            self.write_log_info('Start to split capture file,temporarily folder is ' + self.tmp_folder_path)
-            os.system(r'mkdir ' + self.tmp_folder_path)
-            f = os.popen(r'bin/PcapSplitter -m connection -f ' + self.capture_filename + ' -o ' + self.tmp_folder_path)
-            self.write_log_info('Splitting Finished.Result: \n' + f.read())
+        # 先判断一下Pcapplusplus是否能正常工作
+        if not self.pcapplusplus_works:
+            if platform=='Windows':
+                print()
+        folder = os.path.exists(self.tmp_full_folder_path)
+        if not folder:  # 判断是否存在文件夹如果不存在则创建为文件夹
+            os.makedirs(self.tmp_full_folder_path)
+
+        self.write_log_info('Start to split capture file,temporarily folder is ' + self.tmp_full_folder_path)
+        f = os.popen(self.my_real_path+os.sep+r'bin'+os.sep+self.pcapplusplus_name+' -m connection -f ' + self.capture_filename + ' -o ' + self.tmp_full_folder_path)
+        self.write_log_info('Splitting Finished.Result: \n' + f.read())
+
+    @staticmethod
+    def pcapplusplus_works():
+        cmd = "PcapSplitter -h"
+
+        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=-1)
+        proc.wait()
+        stream_stdout = io.TextIOWrapper(proc.stdout, encoding='utf-8')
+        stream_stderr = io.TextIOWrapper(proc.stderr, encoding='utf-8')
+
+        str_stdout = str(stream_stdout.read())
+
+        if len(str_stdout) > 10:
+            return True
         else:
-            print('Sorry,This program can only run on MacOS...')
-            exit('-1')
+            return False
 
     def write_log(self, text, level):
         self.output_writer.write(Utils.timstamp2timestring() + ' - ' + level + ': ' + text + '\n')
@@ -69,188 +96,14 @@ class redis_analyzer:
             self.write_log(text, level='DEBUG')
 
     def go(self):
-        if self.parse == 'pyshark':
-            self.go_with_pyshark()
-        elif self.parse == 'scapy':
-            self.go_with_scapy()
-        elif self.parse == 'dpkt':
-            self.go_with_dpkt()
-        else:
-            print('Unknown parser!')
+        self.go_with_dpkt()
         self.write_log_info('Finished.')
-
-    def go_with_scapy(self):
-        self.write_log_info('Start to analyse,Filename is ' + self.capture_filename)
-        self.output_writer.flush()
-        # 逐个文件分析
-        for path, dir_list, file_list in os.walk(self.tmp_folder_path):
-            for file_name in file_list:
-                self.write_log_debug('About to open capture file:' + str(file_name))
-                # 设定一些外层的flags
-                # 希望找请求报文
-                wanna_request = True
-                # 已经找到请求报文
-                found_request = False
-                # 希望找响应报文
-                wanna_response = None
-                # 进入每一条TCP流
-                caps = rdpcap('include1streams.pcap')
-                self.write_log_debug('已打开抓包文件：' + str(file_name))
-                # 设定一个计数器，从1开始
-                cap_index = 1
-                self.write_log_debug('准备开始迭代过滤后的数据包文件')
-                for packet in caps:
-                    self.write_log_debug('打开了一个具体的packet，文件名为' + str(file_name) + ',这个packet在流中的序列号为' + str(cap_index))
-                    # 设定一些flags
-                    is_request = None
-                    is_response = None
-                    # 判断一下是否是TCP包
-                    if 'TCP' in packet:
-                        # 判断一下是否是redis请求包
-                        if int(packet['TCP'].dport) == self.REDIS_PORT and packet['TCP'].payload.name == 'Raw':
-                            is_request = True
-                            found_request = True
-                        else:
-                            is_request = False
-                        # 判断一下是否是redis响应包
-                        if int(packet['TCP'].sport) == self.REDIS_PORT and packet['TCP'].payload.name == 'Raw':
-                            is_response = True
-                        else:
-                            is_response = False
-
-                        if is_request:
-                            self.write_log_debug('是一个请求包')
-                            if wanna_request:
-                                self.request_cap = packet
-                                self.request_cap_index = cap_index
-                                found_request = True
-                                wanna_response = True
-                                wanna_request = False
-                                cap_index += 1
-                                continue
-                            else:
-                                # 应该不会进入到这个逻辑里……
-                                self.write_log_warning('进入到了一个不应该进入的条件中！')
-                                cap_index += 1
-                                continue
-                        if is_response:
-                            self.write_log_debug('是一个响应包')
-                            if wanna_response:
-                                # 进入最关键的比对逻辑
-                                self.response_cap = packet
-                                self.request_cap_index = cap_index
-                                self.split_filename = self.tmp_folder_path + file_name
-                                self.compare_request_and_response()
-                                # 清除一下临时的flags
-                                wanna_request = True
-                                found_request = False
-                                wanna_response = False
-                                cap_index += 1
-                                continue
-                            else:
-                                # 可能是每一条流的最开始的响应，或者是孤立的响应报文，忽略
-                                cap_index += 1
-                                continue
-                        # 不是任何感兴趣的包
-                        self.write_log_debug('不是感兴趣的包，跳过')
-                        cap_index += 1
-                self.write_log_debug('抓包文件' + str(file_name) + '已经遍历完毕。')
-                # 包里所有的报文都已经遍历完毕，需要处理一下特殊的情况
-                if found_request and wanna_response:
-                    # 找到了request，但是没有找到任何response
-                    self.split_filename = self.tmp_folder_path + file_name
-                    self.write_log_debug('找到了一个没有响应的请求包！文件名：'+self.split_filename)
-                    self.compare_request_and_response()
-
-    def go_with_pyshark(self):
-        self.write_log_info('Start to analyse,Filename is ' + self.capture_filename)
-        self.output_writer.flush()
-        # 逐个文件分析
-        for path, dir_list, file_list in os.walk(self.tmp_folder_path):
-            for file_name in file_list:
-                self.write_log_debug('About to open capture file:' + str(file_name))
-                # 设定一些外层的flags
-                # 希望找请求报文
-                wanna_request = True
-                # 已经找到请求报文
-                found_request = False
-                # 希望找响应报文
-                wanna_response = None
-                # 进入每一条TCP流
-                caps = pyshark.FileCapture(self.tmp_folder_path + file_name)
-                self.write_log_debug('已打开抓包文件：' + str(file_name))
-                # 设定一个计数器，从1开始
-                cap_index = 1
-                self.write_log_debug('准备开始迭代过滤后的数据包文件')
-                for cap in caps:
-                    self.write_log_debug(
-                        '打开了一个具体的packet，文件名为' + str(file_name) + ',这个packet在流中的序列号为' + str(cap_index))
-                    # 设定一些flags
-                    is_request = None
-                    is_response = None
-                    # 给每一个flags置位
-                    if int(cap.tcp.dstport) == self.REDIS_PORT and int(
-                            cap.tcp.len) > 0 and cap.highest_layer.upper() == self.L7_PROTOCOL_NAME.upper():
-                        is_request = True
-                        found_request = True
-                    else:
-                        is_request = False
-                    if int(cap.tcp.srcport) == self.REDIS_PORT \
-                            and int(cap.tcp.len) > 0 \
-                            and cap.highest_layer.upper() == self.L7_PROTOCOL_NAME.upper():
-                        is_response = True
-                    else:
-                        is_response = False
-
-                    if is_request:
-                        self.write_log_debug('是一个请求包')
-                        if wanna_request:
-                            self.request_cap = cap
-                            found_request = True
-                            wanna_response = True
-                            wanna_request = False
-                            cap_index += 1
-                            continue
-                        else:
-                            # 应该不会进入到这个逻辑里……
-                            self.write_log_warning('进入到了一个不应该进入的条件中！')
-                            cap_index += 1
-                            continue
-                    if is_response:
-                        self.write_log_debug('是一个响应包')
-                        if wanna_response:
-                            # 进入最关键的比对逻辑
-                            self.response_cap = cap
-                            # self.tcp_stream_number = i
-                            self.compare_request_and_response()
-                            # 清除一下临时的flags
-                            wanna_request = True
-                            found_request = False
-                            wanna_response = False
-                            cap_index += 1
-                            continue
-                        else:
-                            # 可能是每一条流的最开始的响应，或者是孤立的响应报文，忽略
-                            cap_index += 1
-                            continue
-                    # 不是任何感兴趣的包
-                    self.write_log_debug('不是感兴趣的包，跳过')
-                    cap_index += 1
-
-                self.write_log_debug('抓包文件' + str(file_name) + '已经遍历完毕。')
-                caps.close()
-                # 包里所有的报文都已经遍历完毕，需要处理一下特殊的情况
-                if found_request and wanna_response:
-                    # 找到了request，但是没有找到任何response
-                    self.write_log_debug('找到了一个没有响应的请求包！')
-                    # self.tcp_stream_number = i
-                    self.compare_request_and_response()
 
     def go_with_dpkt(self):
         self.write_log_info('Start to analyse,Filename is ' + self.capture_filename)
         self.output_writer.flush()
         # 逐个文件分析
-        for path, dir_list, file_list in os.walk(self.tmp_folder_path):
+        for path, dir_list, file_list in os.walk(self.tmp_full_folder_path):
             for file_name in file_list:
                 self.write_log_debug('About to open capture file:' + str(file_name))
                 # 设定一些外层的flags
@@ -261,7 +114,7 @@ class redis_analyzer:
                 # 希望找响应报文
                 wanna_response = None
                 # 进入每一条TCP流
-                f = open(self.tmp_folder_path + file_name, mode='rb')
+                f = open(self.tmp_full_folder_path + file_name, mode='rb')
                 caps = dpkt.pcap.Reader(f)
                 ordered_packets = collections.OrderedDict()  # 有序字典
                 # 开始轮询抓包文件
@@ -315,7 +168,7 @@ class redis_analyzer:
                             # 这种场景下一般是客户端提交了一个很大的请求命令，被拆分成了连续的一串请求数据包
                             # 目前的处理逻辑是不断地舍弃前一个请求数据包，将当前的数据包信息作为最新的请求包来储存
                             self.write_log_debug(
-                                '存在连续的请求包！Filename:' + self.tmp_folder_path + file_name + '.Cap_index:' + str(
+                                '存在连续的请求包！Filename:' + self.tmp_full_folder_path + file_name + '.Cap_index:' + str(
                                     cap_index))
                             self.request_cap = ordered_packets[key]
                             self.request_cap_index = cap_index
@@ -327,7 +180,7 @@ class redis_analyzer:
                             # 进入最关键的比对逻辑
                             self.response_cap = ordered_packets[key]
                             self.response_cap_index = cap_index
-                            self.split_filename = self.tmp_folder_path + file_name
+                            self.split_filename = self.tmp_full_folder_path + file_name
                             self.compare_request_and_response()
                             # 清除一下临时的flags
                             wanna_request = True
@@ -338,7 +191,7 @@ class redis_analyzer:
                         else:
                             # 可能是每一条流的最开始的响应，或者是孤立的响应报文，忽略
                             self.write_log_debug(
-                                '发现一条流的第一个包就是响应包。Filename:' + self.tmp_folder_path + file_name + '.Cap_index:' + str(
+                                '发现一条流的第一个包就是响应包。Filename:' + self.tmp_full_folder_path + file_name + '.Cap_index:' + str(
                                     cap_index))
                             cap_index += 1
                             continue
@@ -352,7 +205,7 @@ class redis_analyzer:
                     # 找到了request，但是没有找到任何response
 
                     self.write_log_debug('找到了一个没有响应的请求包！')
-                    self.split_filename = self.tmp_folder_path + file_name
+                    self.split_filename = self.tmp_full_folder_path + file_name
                     self.compare_request_and_response()
 
     def compare_request_and_response(self):
@@ -460,9 +313,9 @@ def getargs():
     parser = argparse.ArgumentParser(
         description='A tiny tool to analyse capture file under redis protocol.')
 
-    # 指定parser
-    parser.add_argument('--parser', dest='parser', help='set parser type.', type=str,
-                        choices=['dpkt', 'pyshark', 'scapy'],required=True)
+    # 指定parser 废弃不用，固定使用dpkt
+    # parser.add_argument('--parser', dest='parser', help='set parser type.', type=str,
+    #                     choices=['dpkt', 'pyshark', 'scapy'], required=True)
 
     # 指定超时阈值，单位毫秒
     parser.add_argument('-t', '--timeout-threshold', dest='timeout_threshold',
@@ -471,7 +324,7 @@ def getargs():
                         required=True)
 
     # 设定输出文件名
-    parser.add_argument('-o', '--output', dest='output_filename', help='set output filename', type=str,required=True)
+    parser.add_argument('-o', '--output', dest='output_filename', help='set output filename', type=str, required=True)
 
     # 是否设置为调试模式
     parser.add_argument('-d', dest='debug', help="set to debug mode(may output MANY logs)", action='store_true')
@@ -484,8 +337,7 @@ def getargs():
 
 if __name__ == '__main__':
     args = getargs()
-    a = redis_analyzer(args.capture_filename[0], args.timeout_threshold, args.output_filename, debug=args.debug,
-                       parser=args.parser)
+    a = redis_analyzer(args.capture_filename[0], args.timeout_threshold, args.output_filename, debug=args.debug)
 
     a.initial()
     a.go()

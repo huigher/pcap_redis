@@ -1,4 +1,1 @@
-scapy
 dpkt
-pyshark
-nest_asyncio

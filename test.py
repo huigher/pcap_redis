@@ -1,16 +1,18 @@
-import pyshark
+# import pyshark
 import os
+import tempfile
+import io
+import subprocess
 import platform
 import threading
 import time
-from scapy.all import rdpcap
+# from scapy.all import rdpcap
 import Utils
-import dpkt
+# import dpkt
 import socket
 import collections
-import nest_asyncio
+# import nest_asyncio
 
-nest_asyncio.apply()
 
 
 def tmp1():
@@ -121,5 +123,30 @@ def tmp8():
         thread_dict[i].start()
 
 
-a=platform.system()
-print(a)
+def tmp9_shell():
+    f=os.popen('echo $PATH')
+    print(f.read())
+    f2=os.system('Arping -h')
+    print(f2)
+    f3=os.system('vrfe')
+    print(f3)
+
+
+def tmp10():
+    result=os.popen('PcapSplitter -h')
+    result_str=result.read()
+    if 'Usage' in result_str:
+        return True
+    else:
+        return False
+
+def tmp11():
+    print(tempfile.gettempdir())
+    print(tempfile.gettempprefix())
+    print(tempfile.gettempdirb())
+    print(tempfile.gettempprefixb())
+    print(os.sep)
+
+
+# tmp11()
+print(os.path.split(os.path.realpath(__file__))[0])
